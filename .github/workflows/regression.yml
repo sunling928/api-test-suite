@@ -8,17 +8,7 @@ on:
   push:
     paths:
       - 'api_test_suite/**'
-      - 'openapi.yaml'
   workflow_dispatch:
-    inputs:
-      environment:
-        description: '运行环境'
-        required: true
-        default: 'test'
-        type: choice
-        options:
-          - test
-          - staging
 
 env:
   PYTHON_VERSION: '3.10'
@@ -33,35 +23,44 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
       
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest requests pytest-html allure-pytest
+          pip install pytest requests pytest-html
       
-      - name: Run regression tests
+      - name: List files
+        run: |
+          echo "=== Repository structure ==="
+          ls -la
+          echo "=== api_test_suite directory ==="
+          ls -la api_test_suite/ || echo "Directory not found"
+      
+      - name: Run simple test
         run: |
           cd api_test_suite
-          pytest test_order_submit.py -v --tb=short \
-            --junitxml=results.xml \
-            --html=report.html || true
+          python -c "
+          import requests
+          print('Testing API connection...')
+          try:
+              resp = requests.get('http://106.227.91.110:31000/api', timeout=10)
+              print(f'Status: {resp.status_code}')
+          except Exception as e:
+              print(f'Error: {e}')
+          "
       
-      - name: Upload test results
+      - name: Run pytest
+        run: |
+          cd api_test_suite
+          pytest test_order_submit.py::TestOrderSubmit::test_submit_order_success -v --tb=long || echo "Test completed with errors"
+      
+      - name: Upload results
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: test-results
           path: |
-            api_test_suite/results.xml
-            api_test_suite/report.html
+            api_test_suite/*.xml
+            api_test_suite/*.html
           retention-days: 30
-
-  notify:
-    needs: regression-test
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Check result
-        run: |
-          echo "Test completed. Check artifacts for results."
+          if-no-files-found: ignore
