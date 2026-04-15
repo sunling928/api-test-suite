@@ -1,0 +1,159 @@
+# GitLab CI/CD 配置
+# API 回归测试
+
+stages:
+  - lint
+  - test
+  - report
+  - notify
+
+variables:
+  PYTHON_VERSION: "3.10"
+  TEST_ENVIRONMENT: "test"
+
+# 代码检查
+lint:
+  stage: lint
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - pip install flake8 black isort
+  script:
+    - flake8 api_test_suite/ --max-line-length=120
+    - black --check api_test_suite/
+    - isort --check-only api_test_suite/
+  only:
+    changes:
+      - api_test_suite/**/*
+      - openapi.yaml
+
+# API 回归测试 - 测试环境
+regression-test:
+  stage: test
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - pip install -r api_test_suite/requirements.txt
+  script:
+    - pytest api_test_suite/ -v -s --tb=short
+      --environment=${TEST_ENVIRONMENT}
+      --junitxml=results.xml
+      --html=report.html
+      --alluredir=allure-results
+  artifacts:
+    when: always
+    paths:
+      - results.xml
+      - report.html
+      - allure-results/
+    reports:
+      junit: results.xml
+  only:
+    changes:
+      - api_test_suite/**/*
+      - openapi.yaml
+    refs:
+      - merge_requests
+      - main
+      - schedules
+
+# API 回归测试 - 预发环境
+regression-staging:
+  stage: test
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - pip install -r api_test_suite/requirements.txt
+  script:
+    - pytest api_test_suite/ -v -s --tb=short
+      --environment=staging
+      --junitxml=results-staging.xml
+      --html=report-staging.html
+  artifacts:
+    when: always
+    paths:
+      - results-staging.xml
+      - report-staging.html
+  only:
+    refs:
+      - main
+      - tags
+
+# API 变更检测
+api-change-detect:
+  stage: test
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - pip install pyyaml deepdiff
+  script:
+    - python .github/scripts/detect_api_change.py
+      --old-spec=openapi_old.yaml
+      --new-spec=openapi.yaml
+      --output=change_report.json
+  artifacts:
+    paths:
+      - change_report.json
+  only:
+    changes:
+      - openapi.yaml
+
+# 生成 Allure 报告
+allure-report:
+  stage: report
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - pip install allure-pytest
+  script:
+    - allure generate allure-results/ -o allure-report/
+  artifacts:
+    paths:
+      - allure-report/
+  only:
+    refs:
+      - main
+
+# 通知
+notify-failure:
+  stage: notify
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - |
+      curl -X POST "${SLACK_WEBHOOK}" \
+        -H 'Content-Type: application/json' \
+        -d '{
+          "text": "API 回归测试失败!",
+          "attachments": [{
+            "color": "danger",
+            "fields": [{
+              "title": "项目",
+              "value": "'${CI_PROJECT_NAME}'",
+              "short": true
+            }, {
+              "title": "分支",
+              "value": "'${CI_COMMIT_REF_NAME}'",
+              "short": true
+            }]
+          }]
+        }'
+  when: on_failure
+  only:
+    refs:
+      - main
+      - merge_requests
+
+# 定时任务（每日回归）
+scheduled-regression:
+  stage: test
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - pip install -r api_test_suite/requirements.txt
+  script:
+    - pytest api_test_suite/ -v -s --tb=short
+      --junitxml=results-scheduled.xml
+      --html=report-scheduled.html
+  artifacts:
+    when: always
+    paths:
+      - results-scheduled.xml
+      - report-scheduled.html
+  only:
+    - schedules

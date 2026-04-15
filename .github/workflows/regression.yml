@@ -1,0 +1,164 @@
+# API 测试套件 CI/CD 配置
+# 适用于 GitHub Actions / GitLab CI / Jenkins
+
+name: API Regression Test
+
+# 触发条件
+on:
+  # 定时触发（每天凌晨）
+  schedule:
+    - cron: '0 2 * * *'
+  
+  # API 文档变更时触发
+  push:
+    paths:
+      - 'api_test_suite/**'
+      - 'openapi.yaml'
+      - 'api_spec/**'
+  
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '运行环境'
+        required: true
+        default: 'test'
+        type: choice
+        options:
+          - test
+          - staging
+          - production
+      tag:
+        description: '版本标签（如 v1.2.3）'
+        required: false
+
+# 环境变量
+env:
+  PYTHON_VERSION: '3.10'
+  TEST_TIMEOUT: 300
+
+# 作业定义
+jobs:
+  # 单元测试/代码检查
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          pip install flake8 black isort pytest
+      
+      - name: Lint code
+        run: |
+          flake8 api_test_suite/ --max-line-length=120
+          black --check api_test_suite/
+          isort --check-only api_test_suite/
+
+  # API 回归测试
+  regression-test:
+    needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [test, staging]
+        include:
+          - environment: test
+            base_url: 'http://106.227.91.110:31000/api'
+            test_files: 'test_order_submit.py test_order.py'
+          - environment: staging
+            base_url: 'http://staging-api.example.com/api'
+            test_files: 'test_order_submit.py test_order.py'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r api_test_suite/requirements.txt
+      
+      - name: Load environment config
+        run: |
+          if [ '${{ matrix.environment }}' == 'test' ]; then
+            echo ${{ secrets.TEST_AUTH }} > auth_test.json
+          elif [ '${{ matrix.environment }}' == 'staging' ]; then
+            echo ${{ secrets.STAGING_AUTH }} > auth_staging.json
+          fi
+      
+      - name: Run regression tests
+        run: |
+          # 设置环境变量
+          echo "BASE_URL=${{ matrix.base_url }}" >> $GITHUB_ENV
+          echo "ENVIRONMENT=${{ matrix.environment }}" >> $GITHUB_ENV
+          
+          # 运行特定测试文件
+          for test_file in ${{ matrix.test_files }}; do
+            echo "Running tests from $test_file"
+            pytest api_test_suite/$test_file -v -s --tb=short \
+              --junitxml=results_${{ matrix.environment }}_${test_file%.py}.xml \
+              --html=report_${{ matrix.environment }}_${test_file%.py}.html \
+              --alluredir=allure-results-${{ matrix.environment }}
+          done
+      
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.environment }}
+          path: |
+            results_${{ matrix.environment }}_*.xml
+            report_${{ matrix.environment }}_*.html
+          retention-days: 30
+      
+      - name: Upload Allure results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-${{ matrix.environment }}
+          path: allure-results/
+      
+      - name: Generate test summary
+        if: always()
+        run: |
+          python .github/scripts/summary.py results.xml
+
+  # API 变更检测
+  api-change-detect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Detect API changes
+        run: |
+          python .github/scripts/detect_api_change.py \
+            --old-spec=openapi_old.yaml \
+            --new-spec=openapi_new.yaml
+      
+      - name: Generate affected test cases
+        if: success()
+        run: |
+          python .github/scripts/generate_affected_tests.py
+
+  # 通知
+  notify:
+    needs: [regression-test, api-change-detect]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Send notification
+        run: |
+          if [ '${{ needs.regression-test.result }}' == 'failure' ]; then
+            curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
+              -d '{"text": "API 回归测试失败!"}'
+          fi

@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # API 测试服务
+  api-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api-test-runner
+    volumes:
+      - ./reports:/app/reports
+      - ./allure-results:/app/allure-results
+    environment:
+      - BASE_URL=${BASE_URL:-http://106.227.91.110:31000/api}
+      - ENVIRONMENT=${ENVIRONMENT:-test}
+    env_file:
+      - .env
+    command: >
+      pytest -v 
+      --tb=short 
+      --environment=${ENVIRONMENT:-test}
+      --junitxml=/app/reports/results.xml
+      --html=/app/reports/report.html
+      --self-contained-html
+      --alluredir=/app/allure-results
+    networks:
+      - api-test-network
+
+  # 本地 API Mock 服务器（可选）
+  mock-server:
+    image: mockserver/mockserver:5.15.0
+    container_name: mock-api-server
+    ports:
+      - "1080:1080"
+    environment:
+      - MOCKSERVER_INITIALIZATION_JSON_PATH=/config/init.json
+    volumes:
+      - ./mock-config:/config
+    networks:
+      - api-test-network
+
+networks:
+  api-test-network:
+    driver: bridge

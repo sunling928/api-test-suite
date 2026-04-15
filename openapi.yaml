@@ -1,0 +1,267 @@
+openapi: 3.0.1
+info:
+  title: 订单管理 API
+  description: 订单信息管理接口
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@example.com
+
+servers:
+  - url: http://106.227.91.110:31000/api
+    description: 测试环境
+  - url: http://staging-api.example.com/api
+    description: 预发环境
+  - url: http://prod-api.example.com/api
+    description: 生产环境
+
+paths:
+  /mini-operate/api/order/submitOrder:
+    post:
+      summary: 新增订单
+      description: |
+        订单信息新增
+        传入orderInfo进行订单创建
+      operationId: submitOrder
+      tags:
+        - 订单信息
+      parameters:
+        - name: Authorization
+          in: header
+          description: Basic 认证
+          required: true
+          example: Basic c2FiZXI6c2FiZXJfc2VjcmV0
+          schema:
+            type: string
+            default: Basic c2FiZXI6c2FiZXJfc2VjcmV0
+        - name: Blade-Auth
+          in: header
+          description: Bearer Token 认证
+          required: true
+          example: bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
+          schema:
+            type: string
+        - name: blade-requested-with
+          in: header
+          description: 请求来源标识
+          required: true
+          example: BladeHttpRequest
+          schema:
+            type: string
+            default: BladeHttpRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderInfoEntity'
+            examples:
+              正式订单:
+                value:
+                  abilityProId: "ability_001"
+                  signType: 1
+                  freeTrialFlag: 0
+                  productCode: "PROD001"
+                  productCount: 1
+                  productTime: 12
+                  projectCode: "PRJ001"
+                  custId: "CUST001"
+              试用订单:
+                value:
+                  abilityProId: "ability_002"
+                  signType: 1
+                  freeTrialFlag: 1
+                  freeDays: 30
+                  productCode: "PROD002"
+                  productCount: 1
+                  productTime: 1
+                  projectCode: "PRJ002"
+                  custId: "CUST002"
+              解约订单:
+                value:
+                  abilityProId: "ability_003"
+                  signType: 2
+                  freeTrialFlag: 3
+                  productCode: "PROD003"
+                  projectCode: "PRJ003"
+                  custId: "CUST003"
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponseResultVO'
+              examples:
+                成功:
+                  value:
+                    resultCode: 0
+                    resultMsg: "成功"
+                失败:
+                  value:
+                    resultCode: 1
+                    resultMsg: "失败原因"
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 认证失败
+        '403':
+          description: 权限不足
+        '500':
+          description: 服务器错误
+
+components:
+  schemas:
+    OrderInfoEntity:
+      type: object
+      properties:
+        id:
+          type: string
+          description: 主键id
+        abilityProId:
+          type: string
+          description: 能力ID
+        orderNumber:
+          type: string
+          description: 订单号
+        signType:
+          type: integer
+          description: 签约类型
+          enum: [1, 2, 3]
+          x-enum-descriptions:
+            - 签约
+            - 解约
+            - 未签约
+        freeTrialFlag:
+          type: integer
+          description: 订单类型
+          enum: [0, 1, 2, 3]
+          x-enum-descriptions:
+            - 正式
+            - 试用
+            - 未签试用
+            - 解约
+        freeDays:
+          type: integer
+          description: 试用天数
+        productCode:
+          type: string
+          description: 产品编码
+        productCount:
+          type: integer
+          description: 订购数量
+          minimum: 1
+        productTime:
+          type: integer
+          description: 订购时长（月）
+          minimum: 1
+        productType:
+          type: integer
+          description: 订单类别
+          enum: [1, 2]
+          x-enum-descriptions:
+            - 原子订单
+            - 试用订单
+        projectCode:
+          type: string
+          description: 项目编号
+        projectName:
+          type: string
+          description: 项目名称
+        provinceName:
+          type: string
+          description: 项目地区
+        userName:
+          type: string
+          description: 下单人账号
+        userMail:
+          type: string
+          description: 下单人邮箱
+          format: email
+        custId:
+          type: string
+          description: 应用ID
+        requestId:
+          type: string
+          description: 操作流水
+        capId:
+          type: string
+          description: 网关ID
+        callbackUrl:
+          type: string
+          description: 回调地址
+          format: uri
+        isAdminAccount:
+          type: string
+          description: 是否是管理员账号开通标识
+          enum: ['0', '1']
+        adminAccount:
+          type: string
+          description: 管理员账号
+        usageInfoNum:
+          type: integer
+          description: 购买的交付物数量
+        costInstNo:
+          type: string
+          description: 套餐ID
+        costInstName:
+          type: string
+          description: 套餐名称
+        costSpecs:
+          type: string
+          description: 套餐规格
+      required:
+        - abilityProId
+        - productCode
+        - productCount
+        - productTime
+        - projectCode
+        - custId
+
+    OrderResponseResultVO:
+      type: object
+      properties:
+        resultCode:
+          type: integer
+          description: 结果码
+          enum: [0, 1]
+          x-enum-descriptions:
+            - 成功
+            - 失败
+        resultMsg:
+          type: string
+          description: 结果消息
+      required:
+        - resultCode
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+        msg:
+          type: string
+        data:
+          type: object
+
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: Basic 认证
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer Token 认证
+
+security:
+  - basicAuth: []
+  - bearerAuth: []
+
+tags:
+  - name: 订单信息
+    description: 订单管理相关接口
